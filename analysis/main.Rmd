@@ -33,7 +33,7 @@ knitr::opts_chunk$set(
 user_name <- "fernandomillanvillalobos" # your Git username (only needed if
 # you want to deploy to GH pages)
 project_name <- "r-statistics" # adapt!
-package_date <- "2022-05-01" # date of the CRAN snapshot that
+package_date <- "2022-10-01" # date of the CRAN snapshot that
 # the checkpoint package uses
 r_version <- "4.2.1" # R-Version to use
 options(Ncpus = 4) # use 4 cores for parallelized installation of packages
@@ -209,12 +209,11 @@ knitr::read_chunk("scripts/api-keys.R")
 source("scripts/api-keys.R")
 ```
 
-# Introduction
-# Data Importing
-# Data Pre-Processing
-# Exploratory Data Analysis (EDA)
-## Data Summarization
-## Data Visualization
+# Descriptive Statistics
+
+## Generating Random Data
+
+
 
 # Linting
 
