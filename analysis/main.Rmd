@@ -143,6 +143,8 @@ library(cowplot)
 library(extrafont)
 library(ggrepel)
 library(scales)
+library(gapminder)
+library(broom)
 library(janitor)",
 file = "manifest.R")
 ```
@@ -209,12 +211,182 @@ knitr::read_chunk("scripts/api-keys.R")
 source("scripts/api-keys.R")
 ```
 
-# Descriptive Statistics
+# Inferential Statistics
 
-## Generating Random Data
+## Linear regression
+
+To perform further analysis with the parameters of our model, we can pipe the model into the tidy function from the __broom__ package. To apply the same model to each variable (e.g. country) is to use the `split > apply > combine` technique. The combination of `group_by` and `summarise` is a method of `split > apply > combine`. Another method for `slice > apply > combine` is to use `group_by` with `slice_max`, and `ungroup`. `\(.x)` is a shorthand option for an anonymous function in R. It was introduced with R 4.1.0. There is not just one way to run many models with the Tidyverse, but many.
+
+![Ways of run many models with Tidyverse](input/img/run-models-tidyverse.png)
+
+First of all, we can differentiate between the three split types:
+
+- _group_: When we talk about groups, we mean that the data is in the form of a grouped tibble.
+- _lists_: By lists we mean the native list data type 
+- _nested_data_: By nested data, we mean nested data frames in which columns of a data frame contain lists or data frames.
+
+Some methods combine the `apply > combine` step into one function (`split > map_dfr` and `split -> map2_dfr`). All methods have in common that a data frame comes in and a data frame goes out. What kind of data frame is returned depends on what we do in the apply phase. In our case, we chose to output the test statistics or parameters of our models. Similarly, we could also output the predictions of our models.
+
+`group_map` function takes a grouped tibble as input and outputs a list. Before this function, we could not simply iterate a function over groups in a grouped tibble. Instead, we split data frames into a list and applied __purrr__ functions to the elements of that list (e.g., map). If you like, `group_map` is the __dplyr__ version of __purrr’s__ `map` functions.
+
+Compared to `group_map`, this function also accepts a grouped tibble, but outputs a grouped tibble instead of a list. With `group_modify` you have to make sure that a data frame is returned, otherwise the function will yield an error. The great advantage of this method is that we can other the country and continent as columns. The beauty of keeping the country and continent columns is that we can now compare the fit of our model to the actual life expectancies in these countries. To get this data, we can use the `augment` function from the __broom__ package. For each country, the function returns the fitted values of our dependent variable (in our case life expectancy), the residuals and the actual values of the dependent variable.
+
+The combination of `group_split` and `map_dfr` is just an alternative version of `split` and `map_dfr`. `group_split` was introduced in __dplyr__ for version 0.8.0 in 2019. It is still in an experimental state. The difference with `split` is that `group_split` does not name the elements of the returned list.
+
+The `group_nest` function was also introduced with the __dplyr__ version 0.8.0 and works pretty similar to nest. Compared to `nest`, with `group_nest` you name the columns that should not be nested instead of the columns that should be nested.
+
+```{r}
+# plotting the development of life expectancy 
+ggplot(
+  gapminder,
+  aes(x = year, y = lifeExp, group = country)
+) +
+  geom_line(alpha = .3)
+
+ggplot(
+  gapminder,
+  aes(x = year, y = lifeExp, group = country)
+) +
+  geom_line(alpha = .3) +
+  facet_wrap(vars(continent))
+
+# building a linear model
+model <- lm(lifeExp ~ year, data = gapminder)
+summary(model)
+
+# further analysis using the data extracted from the linear model
+model %>% 
+  tidy()
+
+# getting the test statistics of our model
+model %>% 
+  broom::glance()
+
+# calculating the mean per continent and year
+(group_by_summarise_example <- gapminder %>%
+  group_by(continent, year) %>%
+  summarise(mean = mean(lifeExp, na.rm = TRUE)) %>%
+  ungroup())
+
+# plotting the results
+group_by_summarise_example %>%
+  ggplot(aes(x = year, y = mean)) +
+  geom_line(aes(color = continent))
+
+# finding for each continent the year in which life expectancy was highest over the last 50 years
+(group_by_with_slice_max <- gapminder %>%
+  group_by(continent) %>%
+  slice_max(lifeExp, n = 1) %>%
+  ungroup())
+
+# running the same linear model for each country
+(test_statistics <- gapminder %>%
+  split(.$country) %>% # split the data frame into a list. Each list element contains a data frame of one country
+  map_dfr(\(.x) lm(lifeExp ~ year, .x) %>% # loop over the data frame of each country -> apply two functions at once: map_dfr() and lm()
+    broom::glance())) # extract the test statistics from the model object
+
+# looking at the adjusted R-squared
+test_statistics %>%
+  ggplot(aes(x = adj.r.squared)) +
+  geom_histogram(binwidth = .1, fill = "grey80", color = "gray20")
+
+#  ways to run many models with the Tidyverse
+# using grouped data with group_map()
+gapminder %>%
+  group_by(country) %>%
+  group_map(
+    .data = .,
+    .f = ~ lm(lifeExp ~ year, data = .) %>% glance()
+  ) %>% # get the test statistics
+  map_dfr(~.) # combine the list of a data frames obtained in one data frame
+
+# using grouped data with group_modify()
+(method_two_results <- gapminder %>%
+  group_by(country, continent) %>%
+  group_modify(
+    .data = .,
+    .f = ~ lm(lifeExp ~ year, data = .) %>% glance()
+  ) %>%
+  ungroup())
+
+# plotting the results
+method_two_results %>%
+  ggplot(aes(x = adj.r.squared)) +
+  geom_histogram(binwidth = .1, fill = "grey80", color = "gray20") +
+  facet_wrap(vars(continent))
+
+# showing the countries with the worst fit
+method_two_results %>%
+  slice_min(adj.r.squared, n = 5)
 
 
+# comparing the fit of our model to the actual life expectancies in these countries
+(augmented_data <- gapminder %>%
+  group_by(country, continent) %>%
+  group_modify(
+    .data = .,
+    .f = ~ lm(lifeExp ~ year, data = .) %>% augment()
+  ) %>%
+  ungroup())
 
+# comparing our regression models for the bottom five countries with the actual data
+augmented_data %>%
+  filter(country %in% (
+    method_two_results %>% slice_min(adj.r.squared, n = 5) %>%
+      pull(country)
+  )) %>%
+  ggplot(aes(x = year, y = .fitted)) +
+  geom_line() +
+  geom_line(aes(y = .fitted + .resid), color = "blue") +
+  facet_wrap(vars(country))
+
+# the top five countries
+augmented_data %>%
+  filter(country %in% (
+    method_two_results %>% slice_max(adj.r.squared, n = 5) %>%
+      pull(country)
+  )) %>%
+  ggplot(aes(x = year, y = .fitted)) +
+  geom_line() +
+  geom_line(aes(y = .fitted + .resid), color = "blue") +
+  facet_wrap(vars(country))
+
+# using split and map_dfr but keeping countries and continent
+gapminder %>%
+  split(.$country) %>%
+  map_dfr(
+    .x = .,
+    .f = ~ lm(lifeExp ~ year, data = .x) %>%
+      tidy() %>%
+      mutate(
+        country = .x$country[1],
+        continent = .x$continent[1]
+      )
+  )
+
+# using group_split() instead of split()
+gapminder %>%
+  group_split(country) %>%
+  map_dfr(
+    .x = .,
+    .f = ~ lm(lifeExp ~ year, data = .x) %>%
+      tidy() %>%
+      mutate(
+        country = .x$country[1],
+        continent = .x$continent[1]
+      )
+  )
+
+# using group_nest()
+gapminder %>%
+  group_nest(continent, country) %>%
+  mutate(
+    model = map(data, ~ lm(lifeExp ~ year, data = .) %>%
+      tidy())
+  ) %>%
+  select(-data) %>%
+  unnest(model)
+```
 # Linting
 
 The code in this RMarkdown is linted with the [lintr package](https://github.com/jimhester/lintr), which is based on the  [tidyverse style guide](http://style.tidyverse.org/). 
